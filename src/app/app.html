@@ -1,0 +1,227 @@
+<main class="page-shell">
+  <section class="intro" aria-labelledby="page-title">
+    <a class="brand" href="/" aria-label="Northstar home">
+      <span class="brand-mark" aria-hidden="true">n.</span>
+      <span>northstar</span>
+    </a>
+
+    <div class="intro-copy">
+      <p class="eyebrow"><span class="eyebrow-line"></span> LET'S GET TO KNOW YOU</p>
+      <h1 id="page-title">A good connection starts <span>here.</span></h1>
+      <p class="intro-description">
+        Share a few details and let us know if you're interested. We'll be in touch when there's
+        something worth sharing.
+      </p>
+    </div>
+
+    <div class="intro-footer">
+      <div class="footer-rule"></div>
+      <p>Thoughtful updates. No noise.</p>
+      <span>01 <span class="footer-divider">/</span> 01</span>
+    </div>
+  </section>
+
+  <section class="form-side" aria-label="Your details">
+    <div class="form-wrap">
+      <div class="form-heading">
+        <p class="form-step">YOUR DETAILS <span>—</span> 01</p>
+        <h2>Tell us about yourself</h2>
+        <p class="form-subtitle">Name, mobile and email are required. Interest is optional.</p>
+      </div>
+
+      <form [formGroup]="detailsForm" (ngSubmit)="submit()" novalidate>
+        <div class="field">
+          <label for="name">Full name</label>
+          <input
+            id="name"
+            type="text"
+            formControlName="name"
+            placeholder="e.g. Alex Morgan"
+            autocomplete="name"
+            maxlength="100"
+            [attr.aria-invalid]="showError('name')"
+            [attr.aria-describedby]="showError('name') ? 'name-error' : null"
+          />
+          @if (showError('name')) {
+            <p class="field-error" id="name-error">Please enter your name.</p>
+          }
+        </div>
+
+        <div class="field">
+          <label for="mobile">Mobile number</label>
+          <input
+            id="mobile"
+            type="tel"
+            formControlName="mobile"
+            placeholder="+1 555 012 3456"
+            autocomplete="tel"
+            inputmode="tel"
+            maxlength="24"
+            [attr.aria-invalid]="showError('mobile')"
+            [attr.aria-describedby]="showError('mobile') ? 'mobile-error' : null"
+          />
+          @if (showError('mobile')) {
+            <p class="field-error" id="mobile-error">
+              Enter a valid number with 7–15 digits. You can include a leading +.
+            </p>
+          }
+        </div>
+
+        <div class="field">
+          <label for="email">Email address</label>
+          <input
+            id="email"
+            type="email"
+            formControlName="email"
+            placeholder="alex@example.com"
+            autocomplete="email"
+            maxlength="254"
+            [attr.aria-invalid]="showError('email')"
+            [attr.aria-describedby]="showError('email') ? 'email-error' : null"
+          />
+          @if (showError('email')) {
+            <p class="field-error" id="email-error">Enter a valid email address.</p>
+          }
+        </div>
+
+        <label class="interest-option" for="interested">
+          <input id="interested" type="checkbox" formControlName="interested" />
+          <span class="custom-checkbox" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path
+                d="m3.5 8 3 3 6-6"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+          <span class="interest-copy">
+            <span class="interest-title">I'm interested</span>
+            <span class="interest-description">Keep me in the loop with occasional updates.</span>
+          </span>
+        </label>
+
+        <button class="submit-button" type="submit" [disabled]="isSubmitting()">
+          <span>{{ isSubmitting() ? 'Sending…' : 'Send my details' }}</span>
+          @if (!isSubmitting()) {
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path
+                d="M4 10h12m-5-5 5 5-5 5"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          }
+        </button>
+
+        <p
+          class="form-message"
+          aria-live="polite"
+          [class.success]="submissionSucceeded()"
+          [class.error]="submissionFailed()"
+        >
+          @if (submissionSucceeded()) {
+            Thanks, {{ submittedName() }}. Your details have been saved.
+          } @else if (submissionFailed()) {
+            We couldn't save your details. Please try again.
+          }
+        </p>
+      </form>
+
+      <p class="privacy-note">
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2m-8 .5h9v6h-9z"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        Your information stays private and secure.
+      </p>
+
+      <div class="customers-section">
+        <button
+          class="customers-toggle"
+          type="button"
+          [attr.aria-expanded]="customerDetailsVisible()"
+          aria-controls="customer-details"
+          (click)="toggleCustomerDetails()"
+        >
+          <span>View customer details</span>
+          <svg
+            viewBox="0 0 20 20"
+            fill="none"
+            aria-hidden="true"
+            [class.rotated]="customerDetailsVisible()"
+          >
+            <path
+              d="m5 7.5 5 5 5-5"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+
+        @if (customerDetailsVisible()) {
+          <section
+            class="customer-details"
+            id="customer-details"
+            aria-label="Saved customer details"
+          >
+            @if (isLoadingCustomers()) {
+              <p class="customer-status" role="status">Loading customer details…</p>
+            } @else if (customersError()) {
+              <p class="customer-status customer-error" role="alert">{{ customersError() }}</p>
+              <button class="retry-button" type="button" (click)="loadCustomerDetails()">
+                Try again
+              </button>
+            } @else if (customers().length === 0) {
+              <p class="customer-status">No customer details have been submitted yet.</p>
+            } @else {
+              <div class="customer-table-scroll">
+                <table>
+                  <caption>
+                    {{
+                      customers().length
+                    }}
+                    saved
+                    {{
+                      customers().length === 1 ? 'customer' : 'customers'
+                    }}
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Name</th>
+                      <th scope="col">Mobile</th>
+                      <th scope="col">Email</th>
+                      <th scope="col">Interested</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (customer of customers(); track $index) {
+                      <tr>
+                        <td>{{ customer.name }}</td>
+                        <td>{{ customer.mobile }}</td>
+                        <td>{{ customer.email }}</td>
+                        <td>{{ customer.interested ? 'Yes' : 'No' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </section>
+        }
+      </div>
+    </div>
+    <span class="corner-mark" aria-hidden="true">N° 01</span>
+  </section>
+</main>
