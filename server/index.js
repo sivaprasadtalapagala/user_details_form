@@ -7,11 +7,11 @@ const path = require('node:path');
 const port = Number(process.env.PORT || 3000);
 const mongoUri = process.env.MONGODB_URI;
 const mongoDatabaseName = process.env.MONGODB_DB || 'users';
-const mongoClient = mongoUri ? new MongoClient(mongoUri) : null;
 const rootDirectory = path.join(__dirname, '..');
 const distDirectory = path.join(rootDirectory, 'dist', 'user-details-form', 'browser');
 const maxBodyBytes = 10 * 1024;
 
+let mongoClient;
 let usersCollection;
 
 const mimeTypes = {
@@ -195,6 +195,11 @@ async function handleRequest(request, response) {
         return;
       }
 
+      if (!usersCollection) {
+        sendJson(response, 503, { error: 'Customer details storage is temporarily unavailable.' });
+        return;
+      }
+
       try {
         sendJson(response, 200, await readUsers());
       } catch (error) {
@@ -212,6 +217,11 @@ async function handleRequest(request, response) {
 
     if (!request.headers['content-type']?.includes('application/json')) {
       sendJson(response, 415, { error: 'Content-Type must be application/json.' });
+      return;
+    }
+
+    if (!usersCollection) {
+      sendJson(response, 503, { error: 'Submission storage is temporarily unavailable.' });
       return;
     }
 
@@ -249,21 +259,32 @@ const server = http.createServer((request, response) => {
   void handleRequest(request, response);
 });
 
-async function startServer() {
-  if (!mongoClient) {
-    throw new Error('MONGODB_URI environment variable is required.');
+async function connectToDatabase() {
+  if (!mongoUri) {
+    console.error('MONGODB_URI environment variable is required for database access.');
+    return;
   }
 
-  await mongoClient.connect();
-  usersCollection = mongoClient.db(mongoDatabaseName).collection('submissions');
-
-  server.listen(port, '0.0.0.0', () => {
-    console.log(`User details server listening at http://0.0.0.0:${port}`);
+  let client;
+  try {
+    client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 10000 });
+    await client.connect();
+    mongoClient = client;
+    usersCollection = client.db(mongoDatabaseName).collection('submissions');
     console.log(`Connected to MongoDB database "${mongoDatabaseName}".`);
-  });
+  } catch (error) {
+    console.error('MongoDB connection failed; retrying in 15 seconds:', error);
+    await client?.close().catch((closeError) => {
+      console.error('Failed to close the MongoDB client after a connection error:', closeError);
+    });
+    mongoClient = undefined;
+
+    const retryTimer = setTimeout(() => void connectToDatabase(), 15000);
+    retryTimer.unref();
+  }
 }
 
-startServer().catch((error) => {
-  console.error('Failed to start the user details server:', error);
-  process.exitCode = 1;
+server.listen(port, '0.0.0.0', () => {
+  console.log(`User details server listening at http://0.0.0.0:${port}`);
+  void connectToDatabase();
 });
