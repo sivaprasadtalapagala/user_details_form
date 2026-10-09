@@ -1,16 +1,18 @@
 const http = require('node:http');
 const { createHash, timingSafeEqual } = require('node:crypto');
-const { mkdir, readFile, writeFile, stat } = require('node:fs/promises');
+const { readFile, stat } = require('node:fs/promises');
+const { MongoClient } = require('mongodb');
 const path = require('node:path');
 
 const port = Number(process.env.PORT || 3000);
+const mongoUri = process.env.MONGODB_URI;
+const mongoDatabaseName = process.env.MONGODB_DB || 'users';
+const mongoClient = mongoUri ? new MongoClient(mongoUri) : null;
 const rootDirectory = path.join(__dirname, '..');
 const distDirectory = path.join(rootDirectory, 'dist', 'user-details-form', 'browser');
-const dataDirectory = path.join(rootDirectory, 'server', 'data');
-const dataFile = path.join(dataDirectory, 'users.json');
 const maxBodyBytes = 10 * 1024;
 
-let writeQueue = Promise.resolve();
+let usersCollection;
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -167,46 +169,14 @@ function validateUser(body) {
 }
 
 async function saveUser(user) {
-  const operation = writeQueue.then(async () => {
-    let users;
-    try {
-      users = JSON.parse(await readFile(dataFile, 'utf8'));
-      if (!Array.isArray(users)) {
-        throw new Error('Stored user data must be a JSON array.');
-      }
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        users = [];
-      } else {
-        throw error;
-      }
-    }
-
-    users.push(user);
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(dataFile, `${JSON.stringify(users, null, 2)}\n`, 'utf8');
-  });
-
-  writeQueue = operation.then(
-    () => undefined,
-    () => undefined,
-  );
-  await operation;
+  await usersCollection.insertOne(user);
 }
 
 async function readUsers() {
-  try {
-    const users = JSON.parse(await readFile(dataFile, 'utf8'));
-    if (!Array.isArray(users)) {
-      throw new Error('Stored user data must be a JSON array.');
-    }
-    return users;
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
+  return usersCollection
+    .find({}, { projection: { _id: 0 } })
+    .sort({ createdAt: 1 })
+    .toArray();
 }
 
 async function handleRequest(request, response) {
@@ -279,6 +249,21 @@ const server = http.createServer((request, response) => {
   void handleRequest(request, response);
 });
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`User details server listening at http://0.0.0.0:${port}`);
+async function startServer() {
+  if (!mongoClient) {
+    throw new Error('MONGODB_URI environment variable is required.');
+  }
+
+  await mongoClient.connect();
+  usersCollection = mongoClient.db(mongoDatabaseName).collection('submissions');
+
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`User details server listening at http://0.0.0.0:${port}`);
+    console.log(`Connected to MongoDB database "${mongoDatabaseName}".`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error('Failed to start the user details server:', error);
+  process.exitCode = 1;
 });
