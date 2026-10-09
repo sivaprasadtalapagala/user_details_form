@@ -1,13 +1,34 @@
 const http = require('node:http');
-const { mkdir, readFile, writeFile } = require('node:fs/promises');
+const { createHash, timingSafeEqual } = require('node:crypto');
+const { mkdir, readFile, writeFile, stat } = require('node:fs/promises');
 const path = require('node:path');
 
 const port = Number(process.env.PORT || 3000);
-const dataDirectory = path.join(__dirname, 'data');
+const rootDirectory = path.join(__dirname, '..');
+const distDirectory = path.join(rootDirectory, 'dist', 'user-details-form', 'browser');
+const dataDirectory = path.join(rootDirectory, 'server', 'data');
 const dataFile = path.join(dataDirectory, 'users.json');
 const maxBodyBytes = 10 * 1024;
 
 let writeQueue = Promise.resolve();
+
+const mimeTypes = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.txt': 'text/plain; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  default: 'application/octet-stream',
+};
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -16,6 +37,73 @@ function sendJson(response, statusCode, payload) {
     'X-Content-Type-Options': 'nosniff',
   });
   response.end(JSON.stringify(payload));
+}
+
+function isAdminAuthorized(request, expectedPassword) {
+  const providedPassword = request.headers['x-admin-password'];
+  if (typeof providedPassword !== 'string') {
+    return false;
+  }
+
+  const expectedHash = createHash('sha256').update(expectedPassword).digest();
+  const providedHash = createHash('sha256').update(providedPassword).digest();
+  return timingSafeEqual(providedHash, expectedHash);
+}
+
+async function sendFile(response, filePath) {
+  const normalizedPath = path.resolve(filePath);
+  const distRoot = path.resolve(distDirectory);
+
+  if (!normalizedPath.startsWith(distRoot)) {
+    sendJson(response, 403, { error: 'Forbidden.' });
+    return;
+  }
+
+  try {
+    const data = await readFile(normalizedPath);
+    const extension = path.extname(normalizedPath).toLowerCase();
+    response.writeHead(200, {
+      'Content-Type': mimeTypes[extension] || mimeTypes.default,
+      'Cache-Control': 'no-store',
+    });
+    response.end(data);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      sendJson(response, 404, { error: 'Not found.' });
+      return;
+    }
+
+    console.error('Failed to read static file:', error);
+    sendJson(response, 500, { error: 'Unable to load static assets.' });
+  }
+}
+
+async function serveFrontend(request, response) {
+  const requestUrl = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+
+  if (requestUrl.pathname.startsWith('/api/')) {
+    return false;
+  }
+
+  const rawPath = requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname;
+  const normalizedPath = rawPath.replace(/\\/g, '/');
+  const relativePath = normalizedPath.startsWith('/') ? normalizedPath.slice(1) : normalizedPath;
+  const safePath = relativePath.split('?')[0].split('#')[0];
+
+  let filePath = path.join(distDirectory, safePath || 'index.html');
+
+  if (!path.extname(safePath) && safePath !== '') {
+    filePath = path.join(distDirectory, safePath, 'index.html');
+  }
+
+  try {
+    await stat(filePath);
+  } catch {
+    filePath = path.join(distDirectory, 'index.html');
+  }
+
+  await sendFile(response, filePath);
+  return true;
 }
 
 async function readRequestBody(request) {
@@ -124,52 +212,66 @@ async function readUsers() {
 async function handleRequest(request, response) {
   const requestUrl = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
 
-  if (requestUrl.pathname !== '/api/users') {
-    sendJson(response, 404, { error: 'Not found.' });
-    return;
-  }
+  if (requestUrl.pathname === '/api/users') {
+    if (request.method === 'GET') {
+      const adminPassword = process.env.CUSTOMER_DETAILS_PASSWORD;
+      if (!adminPassword) {
+        sendJson(response, 503, { error: 'Customer details access is not configured.' });
+        return;
+      }
 
-  if (request.method === 'GET') {
-    try {
-      sendJson(response, 200, await readUsers());
-    } catch (error) {
-      console.error('Failed to read user details:', error);
-      sendJson(response, 500, { error: 'Unable to read customer details.' });
-    }
-    return;
-  }
+      if (!isAdminAuthorized(request, adminPassword)) {
+        sendJson(response, 401, { error: 'Unauthorized.' });
+        return;
+      }
 
-  if (request.method !== 'POST') {
-    response.setHeader('Allow', 'GET, POST');
-    sendJson(response, 405, { error: 'Method not allowed.' });
-    return;
-  }
-
-  if (!request.headers['content-type']?.includes('application/json')) {
-    sendJson(response, 415, { error: 'Content-Type must be application/json.' });
-    return;
-  }
-
-  try {
-    const body = await readRequestBody(request);
-    const result = validateUser(body);
-    if (result.error) {
-      sendJson(response, 400, { error: result.error });
+      try {
+        sendJson(response, 200, await readUsers());
+      } catch (error) {
+        console.error('Failed to read user details:', error);
+        sendJson(response, 500, { error: 'Unable to read customer details.' });
+      }
       return;
     }
 
-    await saveUser(result.user);
-    sendJson(response, 201, { success: true });
-  } catch (error) {
-    const statusCode = error.statusCode || 500;
-    if (statusCode === 500) {
-      console.error('Failed to save user details:', error);
+    if (request.method !== 'POST') {
+      response.setHeader('Allow', 'GET, POST');
+      sendJson(response, 405, { error: 'Method not allowed.' });
+      return;
     }
-    if (!response.headersSent) {
-      sendJson(response, statusCode, {
-        error: statusCode === 500 ? 'Unable to save user details.' : error.message,
-      });
+
+    if (!request.headers['content-type']?.includes('application/json')) {
+      sendJson(response, 415, { error: 'Content-Type must be application/json.' });
+      return;
     }
+
+    try {
+      const body = await readRequestBody(request);
+      const result = validateUser(body);
+      if (result.error) {
+        sendJson(response, 400, { error: result.error });
+        return;
+      }
+
+      await saveUser(result.user);
+      sendJson(response, 201, { success: true });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      if (statusCode === 500) {
+        console.error('Failed to save user details:', error);
+      }
+      if (!response.headersSent) {
+        sendJson(response, statusCode, {
+          error: statusCode === 500 ? 'Unable to save user details.' : error.message,
+        });
+      }
+    }
+    return;
+  }
+
+  const served = await serveFrontend(request, response);
+  if (!served) {
+    sendJson(response, 404, { error: 'Not found.' });
   }
 }
 
@@ -177,6 +279,6 @@ const server = http.createServer((request, response) => {
   void handleRequest(request, response);
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`User details API listening at http://127.0.0.1:${port}`);
+server.listen(port, '0.0.0.0', () => {
+  console.log(`User details server listening at http://0.0.0.0:${port}`);
 });

@@ -176,16 +176,30 @@
             id="customer-details"
             aria-label="Saved customer details"
           >
+            <form
+              class="field"
+              [formGroup]="customerDetailsForm"
+              (ngSubmit)="loadCustomerDetails()"
+            >
+              <label for="customer-details-password">Admin password</label>
+              <input
+                id="customer-details-password"
+                type="password"
+                formControlName="password"
+                autocomplete="current-password"
+                required
+              />
+              <button class="retry-button" type="submit" [disabled]="isLoadingCustomers()">
+                Load details
+              </button>
+            </form>
             @if (isLoadingCustomers()) {
               <p class="customer-status" role="status">Loading customer details…</p>
             } @else if (customersError()) {
               <p class="customer-status customer-error" role="alert">{{ customersError() }}</p>
-              <button class="retry-button" type="button" (click)="loadCustomerDetails()">
-                Try again
-              </button>
-            } @else if (customers().length === 0) {
+            } @else if (customersLoaded() && customers().length === 0) {
               <p class="customer-status">No customer details have been submitted yet.</p>
-            } @else {
+            } @else if (customersLoaded()) {
               <div class="customer-table-scroll">
                 <table>
                   <caption>

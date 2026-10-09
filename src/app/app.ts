@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 
@@ -22,6 +22,9 @@ export class App {
   protected readonly customersLoaded = signal(false);
   protected readonly customersError = signal('');
   protected readonly customers = signal<CustomerDetails[]>([]);
+  protected readonly customerDetailsForm = this.formBuilder.nonNullable.group({
+    password: ['', Validators.required],
+  });
 
   protected readonly detailsForm = this.formBuilder.nonNullable.group({
     name: ['', [Validators.required, Validators.maxLength(100)]],
@@ -39,25 +42,43 @@ export class App {
     const shouldShowDetails = !this.customerDetailsVisible();
     this.customerDetailsVisible.set(shouldShowDetails);
 
-    if (shouldShowDetails && !this.customersLoaded() && !this.isLoadingCustomers()) {
-      this.loadCustomerDetails();
+    if (!shouldShowDetails) {
+      this.customerDetailsForm.reset({ password: '' });
+      this.customers.set([]);
+      this.customersLoaded.set(false);
+      this.customersError.set('');
     }
   }
 
   protected loadCustomerDetails(): void {
+    if (this.customerDetailsForm.invalid || this.isLoadingCustomers()) {
+      this.customerDetailsForm.markAllAsTouched();
+      return;
+    }
+
     this.customersError.set('');
     this.isLoadingCustomers.set(true);
-    this.http.get<CustomerDetails[]>('/api/users').subscribe({
-      next: (customers) => {
-        this.customers.set(customers);
-        this.customersLoaded.set(true);
-        this.isLoadingCustomers.set(false);
-      },
-      error: () => {
-        this.customersError.set('We could not load customer details. Please try again.');
-        this.isLoadingCustomers.set(false);
-      },
-    });
+    const password = this.customerDetailsForm.getRawValue().password;
+    this.http
+      .get<CustomerDetails[]>('/api/users', { headers: { 'x-admin-password': password } })
+      .subscribe({
+        next: (customers) => {
+          this.customers.set(customers);
+          this.customersLoaded.set(true);
+          this.isLoadingCustomers.set(false);
+        },
+        error: (error: HttpErrorResponse) => {
+          this.customersError.set(
+            error.status === 401
+              ? 'That admin password was not accepted.'
+              : 'We could not load customer details. Please try again.',
+          );
+          if (error.status === 401) {
+            this.customerDetailsForm.reset({ password: '' });
+          }
+          this.isLoadingCustomers.set(false);
+        },
+      });
   }
 
   protected submit(): void {
@@ -79,7 +100,7 @@ export class App {
         this.detailsForm.reset({ name: '', mobile: '', email: '', interested: false });
         this.customersLoaded.set(false);
         this.isSubmitting.set(false);
-        if (this.customerDetailsVisible()) {
+        if (this.customerDetailsVisible() && this.customerDetailsForm.valid) {
           this.loadCustomerDetails();
         }
       },
